@@ -1,0 +1,156 @@
+#!/bin/bash
+
+CONFIG_FILE=~/.vpn_config
+DEFAULT_FILE=~/.vpn_default
+
+# Colors for output
+GREEN="\033[0;32m"
+RED="\033[0;31m"
+YELLOW="\033[1;33m"
+CYAN="\033[0;36m"
+RESET="\033[0m"
+
+# Function to list connections
+list_connections() {
+    echo -e "${CYAN}Available VPN connections:${RESET}"
+    awk -F, '{print NR ") " $1 " (" $2 ")"}' "$CONFIG_FILE"
+}
+
+# Function to connect to a VPN with retries
+connect_vpn() {
+    if [ -n "$1" ]; then
+        # Connect to the VPN based on the given line number
+        line=$(sed "${1}q;d" "$CONFIG_FILE")
+    else
+        # Prompt for VPN if no line number is provided
+        list_connections
+        read -p "Enter the number of the VPN to connect to: " num
+        line=$(sed "${num}q;d" "$CONFIG_FILE")
+    fi
+
+    # Parse the selected line
+    IFS=',' read -r name user_host port key_path password <<< "$line"
+
+    # Check if port is set
+    if [ -z "$port" ]; then
+        echo -e "${RED}Error: Port is not specified for this VPN.${RESET}"
+        return
+    fi
+
+    # Set the maximum retry count
+    max_retries=5
+    attempt=0
+
+    echo -e "${CYAN}Connecting to $name...${RESET}"
+
+    # Try connecting with retries
+    while [ "$attempt" -lt "$max_retries" ]; do
+        echo -e "${YELLOW}Attempt $((attempt + 1)) of $max_retries...${RESET}"
+
+        # Start SSH connection in the background
+        if [ -n "$key_path" ]; then
+            ssh -i "$key_path" -D "$port" "$user_host" &
+        elif [ -n "$password" ]; then
+            sshpass -p "$password" ssh -D "$port" "$user_host" &
+        else
+            echo -e "${RED}Error: No authentication method specified (key or password).${RESET}"
+            return
+        fi
+
+        # Capture the process ID of the SSH command
+        ssh_pid=$!
+        sleep 3
+
+        # Check if the SSH connection is still running
+        if ps -p "$ssh_pid" > /dev/null; then
+            echo -e "${GREEN}Connection established successfully to $name.${RESET}"
+            active_connections["$name"]="$ssh_pid"
+            break
+        else
+            echo -e "${RED}Connection failed. Retrying...${RESET}"
+            attempt=$((attempt + 1))
+        fi
+    done
+
+    # If we reach here and no connection, all attempts failed
+    if [ "$attempt" -ge "$max_retries" ]; then
+        echo -e "${RED}Failed to establish connection to $name after $max_retries attempts.${RESET}"
+        return 1
+    fi
+}
+
+# Function to monitor active connections
+monitor_connections() {
+
+    while true; do
+        clear
+        echo -e "${CYAN}Monitoring active VPN connections. Press Ctrl+C to stop.${RESET}"
+
+        echo -e "${CYAN}Checking active connections...${RESET}"
+        any_active=false
+
+        for name in "${!active_connections[@]}"; do
+            ssh_pid="${active_connections[$name]}"
+            if ps -p "$ssh_pid" > /dev/null; then
+                echo -e "${GREEN}- $name (PID: $ssh_pid) is active.${RESET}"
+                any_active=true
+            else
+                echo -e "${RED}- $name has disconnected.${RESET}"
+                unset active_connections["$name"]
+            fi
+        done
+
+        if [ "$any_active" = false ]; then
+            echo -e "${RED}No active VPN connections.${RESET}"
+        fi
+
+        sleep 10
+    done
+}
+
+# Function to set the default connection
+set_default() {
+    list_connections
+    read -p "Enter the number of the VPN to set as default: " num
+    echo "$num" > "$DEFAULT_FILE"
+    echo -e "${GREEN}Default VPN set.${RESET}"
+}
+
+# Check if -d flag is used to connect to the default VPN
+declare -A active_connections  # Associative array to track active connections
+
+if [ "$1" == "-d" ]; then
+    if [ -f "$DEFAULT_FILE" ]; then
+        default_num=$(cat "$DEFAULT_FILE")
+        echo -e "${CYAN}Connecting to the default VPN...${RESET}"
+        connect_vpn "$default_num"
+        monitor_connections
+    else
+        echo -e "${RED}No default VPN set. Use option 6 to set one.${RESET}"
+    fi
+    exit 0
+fi
+
+# Display menu options
+echo -e "${CYAN}Select an option:${RESET}"
+echo -e "${CYAN}1) List VPNs${RESET}"
+echo -e "${CYAN}2) Add VPN${RESET}"
+echo -e "${CYAN}3) Delete VPN${RESET}"
+echo -e "${CYAN}4) Update VPN${RESET}"
+echo -e "${CYAN}5) Connect to VPN${RESET}"
+echo -e "${CYAN}6) Set Default VPN${RESET}"
+echo -e "${CYAN}7) Monitor Connections${RESET}"
+echo -e "${CYAN}8) Quit${RESET}"
+read -p "Enter choice: " choice
+
+case $choice in
+    1) list_connections ;;
+    2) add_connection ;;
+    3) delete_connection ;;
+    4) update_connection ;;
+    5) connect_vpn ;;
+    6) set_default ;;
+    7) monitor_connections ;;
+    8) echo -e "${CYAN}Exiting...${RESET}" && exit 0 ;;
+    *) echo -e "${RED}Invalid option.${RESET}" ;;
+esac
