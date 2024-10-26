@@ -31,14 +31,14 @@ This script allows you to manage VPN connections using SSH. You can list availab
    Save the script to a file, for example `vpn_manager.sh`.
 
    ```bash
-   curl -O https://example.com/vpn_manager.sh
+   git clone https://github.com/blue-lotus-org/sshvpn-client.git
    ```
 
 2. **Make the Script Executable**
    Run the following command to make the script executable:
 
    ```bash
-   chmod +x vpn_manager.sh
+   chmod +x vpn
    ```
 
 ## Configuration
@@ -62,7 +62,7 @@ This script allows you to manage VPN connections using SSH. You can list availab
 Run the script using the following command:
 
 ```bash
-./vpn_manager.sh
+./vpn
 ```
 
 ### Connecting to the Default VPN
@@ -70,7 +70,7 @@ Run the script using the following command:
 To connect to the default VPN, use:
 
 ```bash
-./vpn_manager.sh -d
+./vpn -d
 ```
 
 ## Commands
