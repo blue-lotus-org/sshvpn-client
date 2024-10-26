@@ -117,15 +117,3 @@ furnished to do so, subject to the following conditions:
    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
    SOFTWARE.
 ```
-
-## How to Use
-
-- Replace `[year]` with the current year.
-- Replace `[your name or organization]` with your name or the name of your organization.
-
-## Adding to Your README
-
-You can include the above MIT License section at the end of your README file. This ensures users know their rights regarding the use of your script.
-
----
-
