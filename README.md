@@ -18,17 +18,17 @@ This script allows you to manage VPN connections using SSH. You can list availab
 - Make sure you have `ssh` and `sshpass` installed:
   - For Ubuntu/Debian: 
     ```bash
-    sudo apt-get install openssh-client sshpass
+    sudo apt-get install openssh-client sshpass fzf
     ```
   - For macOS:
     ```bash
-    brew install hudochenkov/sshpass/sshpass
+    brew install hudochenkov/sshpass/sshpass/fzf
     ```
 
 ## Installation
 
 1. **Download the Script**
-   Save the script to a file, for example `vpn_manager.sh`.
+   Save the script to a file, for example `vpn`.
 
    ```bash
    git clone https://github.com/blue-lotus-org/sshvpn-client.git
