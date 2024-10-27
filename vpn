@@ -16,52 +16,6 @@ list_connections() {
     awk -F, '{print NR ") " $1 " (" $2 ")"}' "$CONFIG_FILE"
 }
 
-# Function to add a new connection
-add_connection() {
-    read -p "Enter a name for the VPN: " name
-    read -p "Enter SSH username@host: " user_host
-    read -p "Enter port for SOCKS proxy (e.g., 1080): " port
-    read -p "Enter path to .pem key file (leave blank for password-based auth): " key_path
-    read -s -p "Enter password (leave blank if using key): " password
-    echo
-    echo "$name,$user_host,$port,$key_path,$password" >> "$CONFIG_FILE"
-    echo "VPN $name added."
-}
-
-# Function to delete a connection
-delete_connection() {
-    list_connections
-    read -p "Enter the number of the VPN to delete: " num
-    sed -i "${num}d" "$CONFIG_FILE"
-    echo "VPN deleted."
-}
-
-# Function to update a connection
-update_connection() {
-    list_connections
-    read -p "Enter the number of the VPN to update: " num
-    line=$(sed "${num}q;d" "$CONFIG_FILE")
-    IFS=',' read -r name user_host port key_path password <<< "$line"
-    
-    read -p "Enter a new name (current: $name): " new_name
-    read -p "Enter SSH username@host (current: $user_host): " new_user_host
-    read -p "Enter port for SOCKS proxy (current: $port): " new_port
-    read -p "Enter path to .pem key file (current: $key_path): " new_key_path
-    read -s -p "Enter password (leave blank to keep current): " new_password
-    echo
-    
-    # Update values if provided, or keep existing
-    new_name=${new_name:-$name}
-    new_user_host=${new_user_host:-$user_host}
-    new_port=${new_port:-$port}
-    new_key_path=${new_key_path:-$key_path}
-    new_password=${new_password:-$password}
-
-    # Replace the line
-    sed -i "${num}s/.*/$new_name,$new_user_host,$new_port,$new_key_path,$new_password/" "$CONFIG_FILE"
-    echo "VPN $new_name updated."
-}
-
 # Function to connect to a VPN with retries
 connect_vpn() {
     if [ -n "$1" ]; then
