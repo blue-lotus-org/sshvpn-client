@@ -79,7 +79,7 @@ update_connection() {
     echo "VPN '$new_name' updated successfully."
 }
 
-# Function to connect to a VPN and keep it alive with auto-reconnect
+# Function to connect to a VPN and keep it alive with auto-reconnect, real-time status display, and hotkey termination
 connect_vpn() {
     if [ -n "$1" ]; then
         line=$(sed -n "${1}p" "$CONFIG_FILE" | tr -d '\r\n')
@@ -106,7 +106,26 @@ connect_vpn() {
     fi
 
     echo "Connecting to VPN '$name' at $user_host on port $port with SSH port $ssh_port..."
-    
+
+    # Function to monitor connection status
+    monitor_status() {
+        while true; do
+            if pgrep -f "ssh.*-D $port.*$user_host" > /dev/null; then
+                echo -ne "\rVPN '$name' is currently connected.        "
+            else
+                echo -ne "\rVPN '$name' is currently disconnected.      "
+            fi
+            sleep 2  # Update every 2 seconds
+        done
+    }
+
+    # Start status monitoring in the background
+    monitor_status &
+    status_pid=$!
+
+    # Trap Ctrl+C (SIGINT) to terminate VPN and status monitor
+    trap "echo -e '\nTerminating VPN connection...'; kill $status_pid 2>/dev/null; exit 0" SIGINT
+
     # Infinite loop to keep the connection alive and reconnect if needed
     while true; do
         if [ -n "$key_path" ]; then
@@ -120,15 +139,22 @@ connect_vpn() {
 
         # Check exit status of SSH
         if [ $? -ne 0 ]; then
-            echo "Connection to VPN '$name' lost. Reconnecting in 5 seconds..."
+            echo -e "\nConnection to VPN '$name' lost. Reconnecting in 5 seconds..."
             sleep 5  # Wait before retrying
         else
             # Break out of the loop if SSH connection exits normally
-            echo "Disconnected from VPN '$name'. Exiting."
+            echo -e "\nDisconnected from VPN '$name'. Exiting."
             break
         fi
     done
+
+    # Clean up: Kill the status monitor process on exit
+    kill "$status_pid" 2>/dev/null
+    echo -e "\nStatus monitor stopped."
 }
+
+
+
 
 
 
