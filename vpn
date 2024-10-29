@@ -79,7 +79,7 @@ update_connection() {
     echo "VPN '$new_name' updated successfully."
 }
 
-# Function to connect to a VPN
+# Function to connect to a VPN and keep it alive with auto-reconnect, real-time status display, and hotkey termination
 connect_vpn() {
     if [ -n "$1" ]; then
         line=$(sed -n "${1}p" "$CONFIG_FILE" | tr -d '\r\n')
@@ -106,14 +106,57 @@ connect_vpn() {
     fi
 
     echo "Connecting to VPN '$name' at $user_host on port $port with SSH port $ssh_port..."
-    if [ -n "$key_path" ]; then
-        ssh -i "$key_path" -p "$ssh_port" -D "$port" "$user_host"
-    elif [ -n "$password" ]; then
-        sshpass -p "$password" ssh -p "$ssh_port" -D "$port" "$user_host"
-    else
-        echo "Error: No authentication method specified (key or password)."
-    fi
+
+    # Function to monitor connection status
+    monitor_status() {
+        while true; do
+            if pgrep -f "ssh.*-D $port.*$user_host" > /dev/null; then
+                echo -ne "\rVPN '$name' is currently connected.        "
+            else
+                echo -ne "\rVPN '$name' is currently disconnected.      "
+            fi
+            sleep 2  # Update every 2 seconds
+        done
+    }
+
+    # Start status monitoring in the background
+    monitor_status &
+    status_pid=$!
+
+    # Trap Ctrl+C (SIGINT) to terminate VPN and status monitor
+    trap "echo -e '\nTerminating VPN connection...'; kill $status_pid 2>/dev/null; exit 0" SIGINT
+
+    # Infinite loop to keep the connection alive and reconnect if needed
+    while true; do
+        if [ -n "$key_path" ]; then
+            ssh -o "ServerAliveInterval=60" -o "ServerAliveCountMax=3" -i "$key_path" -p "$ssh_port" -D "$port" "$user_host"
+        elif [ -n "$password" ]; then
+            sshpass -p "$password" ssh -o "ServerAliveInterval=60" -o "ServerAliveCountMax=3" -p "$ssh_port" -D "$port" "$user_host"
+        else
+            echo "Error: No authentication method specified (key or password)."
+            break
+        fi
+
+        # Check exit status of SSH
+        if [ $? -ne 0 ]; then
+            echo -e "\nConnection to VPN '$name' lost. Reconnecting in 5 seconds..."
+            sleep 5  # Wait before retrying
+        else
+            # Break out of the loop if SSH connection exits normally
+            echo -e "\nDisconnected from VPN '$name'. Exiting."
+            break
+        fi
+    done
+
+    # Clean up: Kill the status monitor process on exit
+    kill "$status_pid" 2>/dev/null
+    echo -e "\nStatus monitor stopped."
 }
+
+
+
+
+
 
 # Function to set the default VPN connection
 set_default() {
@@ -135,9 +178,28 @@ if [ "$1" == "-d" ]; then
     exit 0
 fi
 
+# Function to check and display the status of a VPN connection
+status_vpn() {
+    # Select VPN to check status
+    selected=$(list_connections)
+    [[ -z "$selected" ]] && echo "No VPN selected." && return
+    num=$(echo "$selected" | grep -o '^[0-9]\+')
+    line=$(sed -n "${num}p" "$CONFIG_FILE" | tr -d '\r\n')
+
+    # Parse the selected line
+    IFS=',' read -r name user_host port ssh_port key_path password <<< "$line"
+
+    # Check if there is an active SSH process for this VPN
+    if pgrep -f "ssh.*-D $port.*$user_host" > /dev/null; then
+        echo "VPN '$name' is currently connected."
+    else
+        echo "VPN '$name' is currently disconnected."
+    fi
+}
+
 # Main menu with fzf
 echo "Select an option:"
-options=("List VPNs" "Add VPN" "Delete VPN" "Update VPN" "Connect to VPN" "Set Default VPN")
+options=("List VPNs" "Add VPN" "Delete VPN" "Update VPN" "Connect to VPN" "Set Default VPN" "Status of VPN")
 choice=$(printf "%s\n" "${options[@]}" | fzf --prompt="Select an option: " --height=10 --border)
 
 case $choice in
@@ -147,5 +209,6 @@ case $choice in
     "Update VPN") update_connection ;;
     "Connect to VPN") connect_vpn ;;
     "Set Default VPN") set_default ;;
+    "Status of VPN") status_vpn ;;
     *) echo "Invalid option." ;;
 esac
