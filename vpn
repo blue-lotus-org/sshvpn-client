@@ -131,6 +131,7 @@ connect_vpn() {
 }
 
 
+
 # Function to set the default VPN connection
 set_default() {
     selected=$(list_connections)
@@ -151,9 +152,28 @@ if [ "$1" == "-d" ]; then
     exit 0
 fi
 
+# Function to check and display the status of a VPN connection
+status_vpn() {
+    # Select VPN to check status
+    selected=$(list_connections)
+    [[ -z "$selected" ]] && echo "No VPN selected." && return
+    num=$(echo "$selected" | grep -o '^[0-9]\+')
+    line=$(sed -n "${num}p" "$CONFIG_FILE" | tr -d '\r\n')
+
+    # Parse the selected line
+    IFS=',' read -r name user_host port ssh_port key_path password <<< "$line"
+
+    # Check if there is an active SSH process for this VPN
+    if pgrep -f "ssh.*-D $port.*$user_host" > /dev/null; then
+        echo "VPN '$name' is currently connected."
+    else
+        echo "VPN '$name' is currently disconnected."
+    fi
+}
+
 # Main menu with fzf
 echo "Select an option:"
-options=("List VPNs" "Add VPN" "Delete VPN" "Update VPN" "Connect to VPN" "Set Default VPN")
+options=("List VPNs" "Add VPN" "Delete VPN" "Update VPN" "Connect to VPN" "Set Default VPN" "Status of VPN")
 choice=$(printf "%s\n" "${options[@]}" | fzf --prompt="Select an option: " --height=10 --border)
 
 case $choice in
@@ -163,5 +183,6 @@ case $choice in
     "Update VPN") update_connection ;;
     "Connect to VPN") connect_vpn ;;
     "Set Default VPN") set_default ;;
+    "Status of VPN") status_vpn ;;
     *) echo "Invalid option." ;;
 esac
