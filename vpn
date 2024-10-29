@@ -79,7 +79,7 @@ update_connection() {
     echo "VPN '$new_name' updated successfully."
 }
 
-# Function to connect to a VPN
+# Function to connect to a VPN and keep it alive with auto-reconnect
 connect_vpn() {
     if [ -n "$1" ]; then
         line=$(sed -n "${1}p" "$CONFIG_FILE" | tr -d '\r\n')
@@ -106,14 +106,30 @@ connect_vpn() {
     fi
 
     echo "Connecting to VPN '$name' at $user_host on port $port with SSH port $ssh_port..."
-    if [ -n "$key_path" ]; then
-        ssh -i "$key_path" -p "$ssh_port" -D "$port" "$user_host"
-    elif [ -n "$password" ]; then
-        sshpass -p "$password" ssh -p "$ssh_port" -D "$port" "$user_host"
-    else
-        echo "Error: No authentication method specified (key or password)."
-    fi
+    
+    # Infinite loop to keep the connection alive and reconnect if needed
+    while true; do
+        if [ -n "$key_path" ]; then
+            ssh -o "ServerAliveInterval=60" -o "ServerAliveCountMax=3" -i "$key_path" -p "$ssh_port" -D "$port" "$user_host"
+        elif [ -n "$password" ]; then
+            sshpass -p "$password" ssh -o "ServerAliveInterval=60" -o "ServerAliveCountMax=3" -p "$ssh_port" -D "$port" "$user_host"
+        else
+            echo "Error: No authentication method specified (key or password)."
+            break
+        fi
+
+        # Check exit status of SSH
+        if [ $? -ne 0 ]; then
+            echo "Connection to VPN '$name' lost. Reconnecting in 5 seconds..."
+            sleep 5  # Wait before retrying
+        else
+            # Break out of the loop if SSH connection exits normally
+            echo "Disconnected from VPN '$name'. Exiting."
+            break
+        fi
+    done
 }
+
 
 # Function to set the default VPN connection
 set_default() {
