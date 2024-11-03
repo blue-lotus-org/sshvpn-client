@@ -5,7 +5,7 @@ CONFIG_FILE=~/.vpn_config
 DEFAULT_FILE=~/.vpn_default
 
 # Check dependencies
-for cmd in fzf sshpass; do
+for cmd in fzf sshpass curl; do
     if ! command -v "$cmd" &>/dev/null; then
         echo "Warning: '$cmd' is required but not installed."
     fi
@@ -26,6 +26,32 @@ list_connections() {
         return 1
     fi
     awk -F, '{print NR ") " $1 " (" $2 ")"}' "$CONFIG_FILE" | fzf --header="Available VPN connections" --height=10 --border
+}
+
+# Test speed and ping for each VPN connection
+test_speed() {
+    selected=$(list_connections)
+    [[ -z "$selected" ]] && echo "No VPN selected." && return
+    num=$(echo "$selected" | grep -o '^[0-9]\+')
+    line=$(read_config_line "$num")
+
+    IFS=',' read -r name user_host port ssh_port key_path password <<< "$line"
+    
+    echo "Testing VPN '$name' at $user_host..."
+
+echo -e "\nPing Test:"
+if ping -c 4 "$user_host" &>/dev/null; then
+    ping -c 4 "$user_host" | tail -2 | awk '{print "\033[32m" $0 "\033[0m"}'  # Green for success
+else
+    echo -e "\033[31mPing test failed. $user_host is unreachable.\033[0m"  # Red for failure
+fi
+
+echo -e "\nSpeed Test (using curl):"
+if curl -o /dev/null -s -w "Download Speed: %{speed_download} bytes/sec\n" "http://$user_host"; then
+    echo -e "\033[32mSpeed test completed successfully.\033[0m"
+else
+    echo -e "\033[31mSpeed test failed. Unable to connect to $user_host.\033[0m"
+fi
 }
 
 # Add a new VPN connection
@@ -177,7 +203,7 @@ status_vpn() {
 
 # Main menu
 echo "Select an option:"
-options=("List VPNs" "Add VPN" "Delete VPN" "Update VPN" "Connect to VPN" "Set Default VPN" "Status of VPN")
+options=("List VPNs" "Add VPN" "Delete VPN" "Update VPN" "Connect to VPN" "Set Default VPN" "Status of VPN" "Test Speed of VPN")
 choice=$(printf "%s\n" "${options[@]}" | fzf --prompt="Select an option: " --height=10 --border)
 
 case $choice in
@@ -188,5 +214,6 @@ case $choice in
     "Connect to VPN") connect_vpn ;;
     "Set Default VPN") set_default ;;
     "Status of VPN") status_vpn ;;
+    "Test Speed of VPN") test_speed ;;
     *) echo "Invalid option." ;;
 esac
