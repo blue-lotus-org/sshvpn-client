@@ -1,0 +1,192 @@
+#!/bin/bash
+
+# Configuration files
+CONFIG_FILE=~/.vpn_config
+DEFAULT_FILE=~/.vpn_default
+
+# Check dependencies
+for cmd in fzf sshpass; do
+    if ! command -v "$cmd" &>/dev/null; then
+        echo "Warning: '$cmd' is required but not installed."
+    fi
+done
+
+# Ensure the config file exists
+touch "$CONFIG_FILE"
+
+# Helper function: Read line from CONFIG_FILE based on line number
+read_config_line() {
+    sed -n "${1}p" "$CONFIG_FILE" | tr -d '\r\n'
+}
+
+# List VPN connections using fzf
+list_connections() {
+    if [ ! -s "$CONFIG_FILE" ]; then
+        echo "No VPN connections found."
+        return 1
+    fi
+    awk -F, '{print NR ") " $1 " (" $2 ")"}' "$CONFIG_FILE" | fzf --header="Available VPN connections" --height=10 --border
+}
+
+# Add a new VPN connection
+add_connection() {
+    read -p "Enter a name for the VPN: " name
+    read -p "Enter SSH username@host: " user_host
+    read -p "Enter SOCKS proxy port (default: 1080): " port
+    port=${port:-1080}
+
+    read -p "Enter SSH port (default: 22): " ssh_port
+    ssh_port=${ssh_port:-22}
+
+    read -p "Enter path to .pem key file (leave blank for password-based auth): " key_path
+    read -s -p "Enter password (leave blank if using key): " password
+    echo
+
+    echo "$name,$user_host,$port,$ssh_port,$key_path,$password" >> "$CONFIG_FILE"
+    echo "VPN '$name' added successfully."
+}
+
+# Delete a VPN connection
+delete_connection() {
+    selected=$(list_connections)
+    [[ -z "$selected" ]] && echo "No VPN selected." && return
+    num=$(echo "$selected" | grep -o '^[0-9]\+')
+    sed -i "${num}d" "$CONFIG_FILE"
+    echo "VPN deleted successfully."
+}
+
+# Update a VPN connection
+update_connection() {
+    selected=$(list_connections)
+    [[ -z "$selected" ]] && echo "No VPN selected." && return
+    num=$(echo "$selected" | grep -o '^[0-9]\+')
+    line=$(read_config_line "$num")
+
+    IFS=',' read -r name user_host port ssh_port key_path password <<< "$line"
+
+    read -p "Enter a new name (current: $name): " new_name
+    read -p "Enter SSH username@host (current: $user_host): " new_user_host
+    read -p "Enter SOCKS proxy port (current: $port): " new_port
+    read -p "Enter SSH port (current: $ssh_port): " new_ssh_port
+    read -p "Enter path to .pem key file (current: $key_path): " new_key_path
+    read -s -p "Enter password (leave blank to keep current): " new_password
+    echo
+
+    new_name=${new_name:-$name}
+    new_user_host=${new_user_host:-$user_host}
+    new_port=${new_port:-$port}
+    new_ssh_port=${new_ssh_port:-$ssh_port}
+    new_key_path=${new_key_path:-$key_path}
+    new_password=${new_password:-$password}
+
+    sed -i "${num}s/.*/$new_name,$new_user_host,$new_port,$new_ssh_port,$new_key_path,$new_password/" "$CONFIG_FILE"
+    echo "VPN '$new_name' updated successfully."
+}
+
+# Function to check if a port is already in use
+is_port_in_use() {
+    local port=$1
+    if lsof -i :$port &>/dev/null; then
+        return 0  # Port is in use
+    else
+        return 1  # Port is free
+    fi
+}
+# Function to connect to a VPN and ensure port availability
+connect_vpn() {
+    if [ -n "$1" ]; then
+        line=$(read_config_line "$1")
+    else
+        selected=$(list_connections)
+        [[ -z "$selected" ]] && echo "No VPN selected." && return
+        num=$(echo "$selected" | grep -o '^[0-9]\+')
+        line=$(read_config_line "$num")
+    fi
+
+    IFS=',' read -r name user_host port ssh_port key_path password <<< "$line"
+    [[ -z "$user_host" || -z "$port" || -z "$ssh_port" ]] && echo "Error: Missing required information." && return
+
+    # Check if the specified SOCKS5 port is in use, and prompt if necessary
+    while is_port_in_use "$port"; do
+        echo "The SOCKS5 port $port is currently in use by another process."
+        read -p "Enter a different SOCKS5 port: " port
+    done
+
+    echo "Connecting to VPN '$name' at $user_host on port $port with SSH port $ssh_port..."
+
+    trap 'echo "Terminating VPN connection..."; kill $status_pid 2>/dev/null; exit 0' SIGINT
+
+    # Status monitor
+    monitor_status() {
+        while :; do
+            if pgrep -f "ssh.*-D $port.*$user_host" >/dev/null; then
+                echo -ne "\rVPN '$name' is connected.    "
+            else
+                echo -ne "\rVPN '$name' is disconnected. "
+            fi
+            sleep 2
+        done
+    }
+
+    monitor_status & status_pid=$!
+
+    # Establish SSH connection and reconnect if needed
+    while :; do
+        if [ -n "$key_path" ]; then
+            ssh -o "ServerAliveInterval=60" -o "ServerAliveCountMax=3" -i "$key_path" -p "$ssh_port" -D "$port" "$user_host"
+        elif [ -n "$password" ]; then
+            sshpass -p "$password" ssh -o "ServerAliveInterval=60" -o "ServerAliveCountMax=3" -p "$ssh_port" -D "$port" "$user_host"
+        else
+            echo "Error: No authentication method specified (key or password)."
+            break
+        fi
+
+        [[ $? -ne 0 ]] && echo -e "\nConnection to VPN '$name' lost. Reconnecting in 5 seconds..." && sleep 5 || break
+    done
+
+    kill "$status_pid" 2>/dev/null
+    echo -e "\nStatus monitor stopped."
+}
+
+# Set default VPN
+set_default() {
+    selected=$(list_connections)
+    [[ -z "$selected" ]] && echo "No VPN selected." && return
+    num=$(echo "$selected" | grep -o '^[0-9]\+')
+    echo "$num" > "$DEFAULT_FILE"
+    echo "Default VPN set successfully."
+}
+
+# Connect to default VPN if -d flag is provided
+[[ "$1" == "-d" && -f "$DEFAULT_FILE" ]] && connect_vpn "$(cat "$DEFAULT_FILE")" && exit 0
+
+# Check and display VPN status
+status_vpn() {
+    selected=$(list_connections)
+    [[ -z "$selected" ]] && echo "No VPN selected." && return
+    num=$(echo "$selected" | grep -o '^[0-9]\+')
+    line=$(read_config_line "$num")
+
+    IFS=',' read -r name user_host port _ <<< "$line"
+    if pgrep -f "ssh.*-D $port.*$user_host" >/dev/null; then
+        echo "VPN '$name' is currently connected."
+    else
+        echo "VPN '$name' is currently disconnected."
+    fi
+}
+
+# Main menu
+echo "Select an option:"
+options=("List VPNs" "Add VPN" "Delete VPN" "Update VPN" "Connect to VPN" "Set Default VPN" "Status of VPN")
+choice=$(printf "%s\n" "${options[@]}" | fzf --prompt="Select an option: " --height=10 --border)
+
+case $choice in
+    "List VPNs") list_connections ;;
+    "Add VPN") add_connection ;;
+    "Delete VPN") delete_connection ;;
+    "Update VPN") update_connection ;;
+    "Connect to VPN") connect_vpn ;;
+    "Set Default VPN") set_default ;;
+    "Status of VPN") status_vpn ;;
+    *) echo "Invalid option." ;;
+esac

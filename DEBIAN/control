@@ -1,0 +1,9 @@
+Package: sshvpn
+Version: 1.0.0
+Section: utils
+Priority: optional
+Architecture: all
+Depends: bash, fzf, sshpass, lsof
+Maintainer: lotuschain.org info@lotuschain.org 
+Description: SSH VPN Manager Script
+ sshvpn is a command-line tool to manage SSH-based VPN connections with features for adding, connecting, and managing connections.
