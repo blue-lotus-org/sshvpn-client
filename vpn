@@ -83,7 +83,16 @@ update_connection() {
     echo "VPN '$new_name' updated successfully."
 }
 
-# Connect to a VPN
+# Function to check if a port is already in use
+is_port_in_use() {
+    local port=$1
+    if lsof -i :$port &>/dev/null; then
+        return 0  # Port is in use
+    else
+        return 1  # Port is free
+    fi
+}
+# Function to connect to a VPN and ensure port availability
 connect_vpn() {
     if [ -n "$1" ]; then
         line=$(read_config_line "$1")
@@ -96,6 +105,12 @@ connect_vpn() {
 
     IFS=',' read -r name user_host port ssh_port key_path password <<< "$line"
     [[ -z "$user_host" || -z "$port" || -z "$ssh_port" ]] && echo "Error: Missing required information." && return
+
+    # Check if the specified SOCKS5 port is in use, and prompt if necessary
+    while is_port_in_use "$port"; do
+        echo "The SOCKS5 port $port is currently in use by another process."
+        read -p "Enter a different SOCKS5 port: " port
+    done
 
     echo "Connecting to VPN '$name' at $user_host on port $port with SSH port $ssh_port..."
 
@@ -115,6 +130,7 @@ connect_vpn() {
 
     monitor_status & status_pid=$!
 
+    # Establish SSH connection and reconnect if needed
     while :; do
         if [ -n "$key_path" ]; then
             ssh -o "ServerAliveInterval=60" -o "ServerAliveCountMax=3" -i "$key_path" -p "$ssh_port" -D "$port" "$user_host"
